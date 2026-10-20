@@ -111,6 +111,22 @@ jobs:
             cat docs/spark-kernel-release-notes.md
           } > "$RUNNER_TEMP/release-notes.md"
 
+      - name: Collect the raw kernel images
+        working-directory: sparkkernel
+        run: |
+          mkdir -p artifacts
+          cp "$GITHUB_WORKSPACE/kernel_workspace/out/arch/arm64/boot/Image.gz-dtb" artifacts/
+          cp "$GITHUB_WORKSPACE/kernel_workspace/out/arch/arm64/boot/dts/mediatek/mt6893.dtb" artifacts/
+          cp dist/*.zip artifacts/ 2>/dev/null || true
+          ls -la artifacts/
+
+      - name: Upload the kernel as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: spark-kernel-${{ steps.meta.outputs.git_hash }}
+          path: sparkkernel/artifacts/
+          retention-days: 30
+
       - name: Publish pre-release
         uses: softprops/action-gh-release@v2
         with:
@@ -119,5 +135,6 @@ jobs:
           name: Spark Kernel ${{ steps.meta.outputs.kernel_release }}
           tag_name: spark-${{ steps.meta.outputs.build_date }}-${{ steps.meta.outputs.git_hash }}
           body_path: ${{ runner.temp }}/release-notes.md
-          files: sparkkernel/dist/*.zip
+          files: |
+            sparkkernel/artifacts/*
           fail_on_unmatched_files: true
