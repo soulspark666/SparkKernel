@@ -1,0 +1,117 @@
+name: Spark Kernel release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'anykernel/**'
+      - 'scripts/**'
+      - 'docs/**'
+      - '.github/workflows/**'
+
+permissions:
+  contents: write
+
+env:
+  KERNEL_REPO: soulspark666/kernel_oplus_mt6893
+  KERNEL_BRANCH: port/v2-mt6893
+  DEFCONFIG: mt6893_defconfig
+
+jobs:
+  build:
+    name: Build kernel and publish pre-release
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Spark Kernel
+        uses: actions/checkout@v4
+        with:
+          path: sparkkernel
+
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.KERNEL_REPO }}
+          ref: ${{ env.KERNEL_BRANCH }}
+          submodules: recursive
+          fetch-depth: 0
+          path: kernel_workspace
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex libssl-dev libelf-dev \
+            ccache zip unzip python3 rsync cpio lz4 \
+            clang-18 lld-18
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ github.sha }}
+          restore-keys: ccache-
+
+      - name: Build kernel
+        working-directory: kernel_workspace
+        env:
+          LLVM: 1
+          LLVM_IAS: 1
+        run: |
+          export PATH="/usr/lib/llvm-18/bin:$PATH"
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          make O=out \
+            ARCH=arm64 \
+            LLVM=1 LLVM_IAS=1 \
+            CC=clang-18 LD=ld.lld-18 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            ${{ env.DEFCONFIG }}
+          make O=out \
+            ARCH=arm64 \
+            LLVM=1 LLVM_IAS=1 \
+            CC=clang-18 LD=ld.lld-18 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            -j"$(nproc)" Image.gz-dtb
+
+      - name: Package AnyKernel3 zip
+        working-directory: sparkkernel
+        run: |
+          chmod +x scripts/package_spark_kernel.sh
+          ./scripts/package_spark_kernel.sh "$GITHUB_WORKSPACE/kernel_workspace"
+
+      - name: Collect release metadata
+        id: meta
+        working-directory: sparkkernel
+        run: |
+          GIT_HASH="$(git -C "$GITHUB_WORKSPACE/kernel_workspace" rev-parse --short=12 HEAD)"
+          KERNEL_RELEASE="$(cat "$GITHUB_WORKSPACE/kernel_workspace/out/include/config/kernel.release")"
+          BUILD_DATE="$(date -u +%Y%m%d)"
+          echo "git_hash=$GIT_HASH" >> "$GITHUB_OUTPUT"
+          echo "kernel_release=$KERNEL_RELEASE" >> "$GITHUB_OUTPUT"
+          echo "build_date=$BUILD_DATE" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Spark Kernel \`$KERNEL_RELEASE\`"
+            echo
+            echo "Built from \`$GIT_HASH\` on $BUILD_DATE."
+            echo
+            echo "Device: realme RMX3031 (Cupida) / MT6893, kernel 4.19."
+            echo
+            cat docs/spark-kernel-release-notes.md
+          } > "$RUNNER_TEMP/release-notes.md"
+
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          draft: false
+          name: Spark Kernel ${{ steps.meta.outputs.kernel_release }}
+          tag_name: spark-${{ steps.meta.outputs.build_date }}-${{ steps.meta.outputs.git_hash }}
+          body_path: ${{ runner.temp }}/release-notes.md
+          files: sparkkernel/dist/*.zip
+          fail_on_unmatched_files: true
