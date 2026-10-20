@@ -54,6 +54,12 @@ jobs:
           key: ccache-${{ github.sha }}
           restore-keys: ccache-
 
+      - name: Remove the stale KernelSU susfs stop-ship guard
+        working-directory: kernel_workspace
+        run: |
+          chmod +x scripts/patch_kernelsu_susfs_guard.sh
+          ./scripts/patch_kernelsu_susfs_guard.sh
+
       - name: Build kernel
         working-directory: kernel_workspace
         env:
